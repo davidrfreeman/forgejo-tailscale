@@ -1,4 +1,4 @@
-# forgejo-tailscale
+# Forgejo Tailscale
 Compose Deployment for Forgejo w/Tailscale
 
 Spins up Forgejo with Postgres DB and Runner for Actions.
