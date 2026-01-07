@@ -1,0 +1,83 @@
+services:
+  forgejo-ts:
+    image: tailscale/tailscale:v1.92.4
+    container_name: forgejo-ts
+    hostname: forgejo
+    volumes:
+      - ./tailscale:/var/lib/tailscale
+      - ./tailscale/serve/serve.json:/config/serve.json:ro
+    environment:
+      - TS_AUTHKEY=${TS_AUTHKEY}
+      - TS_STATE_DIR=/var/lib/tailscale
+      - TS_SERVE_CONFIG=/config/serve.json
+
+  forgejo:
+    image: codeberg.org/forgejo/forgejo:13.0.3-rootless
+    container_name: forgejo-server
+    user: 1000:1000
+    network_mode: service:forgejo-ts
+    environment:
+      # Pass admin credentials from the .env file (ensure .env exists)
+      - ADMIN_USER=${FORGEJO_ADMIN_USER}
+      - ADMIN_PASS=${FORGEJO_ADMIN_PASS}
+      - ADMIN_EMAIL=${FORGEJO_ADMIN_EMAIL}
+      # # Set the init script to the path where the file is mounted
+      # - FORGEJO_INIT_SCRIPT=/app/init-admin.sh
+      # Lock the installation page
+      - FORGEJO__security__INSTALL_LOCK=true
+      - USER_UID=1000
+      - USER_GID=1000
+      # https://forgejo.org/docs/latest/admin/config-cheat-sheet/
+      - FORGEJO__server__SSH_PORT=2222
+      - FORGEJO__server__ROOT_URL=https://${FORGEJO_HOSTNAME}
+      - FORGEJO__server__SSH_DOMAIN=${FORGEJO_HOSTNAME}
+      - FORGEJO__database__DB_TYPE=postgres
+      - FORGEJO__database__HOST=localhost:5432
+      - FORGEJO__database__NAME=${FORGEJO_POSTGRES_DB}
+      - FORGEJO__database__USER=${FORGEJO_POSTGRES_USERNAME}
+      - FORGEJO__database__PASSWD=${FORGEJO_POSTGRES_PASSWORD}
+    volumes:
+      - /mnt/nas_share/forgejo:/var/lib/gitea
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
+    restart: unless-stopped
+    depends_on:
+      - database
+
+  database:
+    image: docker.io/library/postgres:17.7
+    container_name: forgejo-database
+    user: 1000:1000
+    network_mode: service:forgejo-ts
+    environment:
+      - POSTGRES_USER=${FORGEJO_POSTGRES_USERNAME}
+      - POSTGRES_PASSWORD=${FORGEJO_POSTGRES_PASSWORD}
+      - POSTGRES_DB=${FORGEJO_POSTGRES_DB}
+      - USER_UID=1000
+      - USER_GID=1000
+    volumes:
+    # Update to use NAS mount
+      - ./postgres:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  runner:
+    image: code.forgejo.org/forgejo/runner:12.1.2
+    container_name: forgejo-runner
+    # Group ID matches host's docker group ID (988 on Ubuntu 24.04 test)
+    user: 0:988
+    network_mode: service:forgejo-ts
+    environment:
+      - DOCKER_HOST=unix:///var/run/docker.sock
+      - FORGEJO_INSTANCE_URL=https://forgejo.echo-logarithm.ts.net
+      - FORGEJO_RUNNER_REGISTRATION_TOKEN=${FORGEJO_RUNNER_REGISTRATION_TOKEN}
+      - FORGEJO_RUNNER_NAME=homelab_runner
+
+    volumes:
+      - ./forgejo/runner-data:/data
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: unless-stopped
+    # First use sleep and register runner
+    # forgejo-runner register
+    # Then switch `command` to forgejo-runner daemon and re-run docker compose up
+    # command: '/bin/sh -c "while : ; do sleep 1 ; done ;"'
+    command: '/bin/sh -c "forgejo-runner daemon"'
